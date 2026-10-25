@@ -1,23 +1,14 @@
 import React from 'react';
-import {
-  UserPlus,
-  UserCheck,
-  GraduationCap,
-  BookOpen,
-  Trash2,
-  Eye,
-  Sparkles,
-  Users,
-} from 'lucide-react';
+import { Trash2, ArrowUpRight } from 'lucide-react';
 import { Student } from '../lib/db';
 
-const AVATAR_GRADIENTS = [
-  'from-fuchsia-500 to-purple-600',
-  'from-cyan-500 to-blue-600',
-  'from-emerald-500 to-teal-600',
-  'from-amber-500 to-orange-600',
-  'from-rose-500 to-pink-600',
-  'from-indigo-500 to-violet-600',
+const AVATAR_TONES = [
+  'bg-zinc-800 text-zinc-100',
+  'bg-neutral-800 text-neutral-100',
+  'bg-stone-800 text-stone-100',
+  'bg-[#1e2330] text-blue-200',
+  'bg-[#1c2623] text-emerald-200',
+  'bg-[#26202a] text-purple-200',
 ];
 
 export function getAvatarGradient(id: string): string {
@@ -25,7 +16,7 @@ export function getAvatarGradient(id: string): string {
   for (let i = 0; i < id.length; i++) {
     hash = id.charCodeAt(i) + ((hash << 5) - hash);
   }
-  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
+  return AVATAR_TONES[Math.abs(hash) % AVATAR_TONES.length];
 }
 
 export function getInitials(name: string): string {
@@ -63,117 +54,100 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   busy = false,
 }) => {
   const isSelf = student.id === currentUserId;
-  const gradient = getAvatarGradient(student.id);
+  const avatarTone = getAvatarGradient(student.id);
 
   return (
-    <div className="group relative flex flex-col justify-between rounded-2xl bg-slate-900/75 border border-slate-800/80 hover:border-fuchsia-500/40 p-5 shadow-lg hover:shadow-fuchsia-950/20 transition-all duration-200">
+    <div
+      onClick={() => onViewProfile(student.id)}
+      className="group relative flex flex-col justify-between rounded-[24px] bg-[#121215] hover:bg-[#16161a] border border-white/[0.06] hover:border-white/[0.12] p-6 transition-all duration-200 cursor-pointer"
+    >
       <div>
-        {/* Top Row: Avatar + Badges + Actions */}
-        <div className="flex items-start justify-between gap-3">
-          <div
-            onClick={() => onViewProfile(student.id)}
-            className="flex items-center gap-3.5 cursor-pointer group/title"
-          >
+        {/* Header: Avatar + Name + Action */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3.5 min-w-0">
             <div
-              className={`w-12 h-12 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-bold text-base shadow-md shrink-0 group-hover/title:scale-105 transition-transform`}
+              className={`w-12 h-12 rounded-full ${avatarTone} border border-white/[0.08] flex items-center justify-center font-semibold text-sm tracking-tight shrink-0`}
             >
               {getInitials(student.name)}
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-semibold text-slate-100 group-hover/title:text-fuchsia-400 transition-colors truncate">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-[16px] text-white tracking-tight truncate">
                   {student.name}
                 </h3>
                 {isSelf && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/30">
-                    <Sparkles className="w-2.5 h-2.5" /> Active You
-                  </span>
-                )}
-                {!isSelf && followsYou && (
-                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                    Follows you
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-white/10 text-white">
+                    You
                   </span>
                 )}
               </div>
-              <p className="text-xs font-mono text-slate-400 truncate mt-0.5">
-                {student.id}
+              <p className="text-[13px] text-zinc-500 truncate mt-0.5">
+                {student.branch} · Year {student.year}
               </p>
             </div>
           </div>
 
+          <div
+            className="flex items-center gap-1.5 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {!isSelf ? (
+              <button
+                onClick={() => onToggleFollow(student, isFollowing)}
+                disabled={busy}
+                className={`px-4 py-1.5 rounded-full text-[13px] font-medium transition-all ${
+                  isFollowing
+                    ? 'bg-white/[0.08] hover:bg-red-500/15 text-zinc-200 hover:text-red-400'
+                    : 'bg-white hover:bg-zinc-200 text-black font-semibold'
+                }`}
+              >
+                {isFollowing ? 'Following' : 'Follow'}
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 group-hover:text-white transition-colors px-2 py-1">
+                Profile <ArrowUpRight className="w-3.5 h-3.5" />
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Bio */}
+        <p className="mt-4 text-[14px] text-zinc-400 line-clamp-2 leading-relaxed">
+          {student.bio || 'No bio added.'}
+        </p>
+      </div>
+
+      {/* Bottom Metric Strip */}
+      <div className="mt-6 pt-4 border-t border-white/[0.05] flex items-center justify-between text-[13px]">
+        <div className="flex items-center gap-4 text-zinc-500">
+          <span>
+            <strong className="font-semibold text-zinc-200">{followersCount}</strong> followers
+          </span>
+          <span>
+            <strong className="font-semibold text-zinc-200">{followingCount}</strong> following
+          </span>
+          {!isSelf && followsYou && (
+            <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-white/[0.05] text-zinc-400">
+              Follows you
+            </span>
+          )}
+        </div>
+
+        <div
+          className="flex items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="text-[11px] font-mono text-zinc-600">
+            {student.id}
+          </span>
           {onDeleteStudent && (
             <button
               onClick={() => onDeleteStudent(student)}
               disabled={busy}
               title={`Delete ${student.name}`}
-              className="opacity-70 group-hover:opacity-100 p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+              className="opacity-0 group-hover:opacity-100 p-1.5 rounded-full text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
             >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-
-        {/* Academic Metadata Badges */}
-        <div className="flex flex-wrap items-center gap-2 mt-4">
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/90 text-cyan-300 border border-slate-700/70">
-            <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
-            {student.branch}
-          </span>
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/90 text-purple-300 border border-slate-700/70">
-            <GraduationCap className="w-3.5 h-3.5 text-purple-400" />
-            Year {student.year}
-          </span>
-        </div>
-
-        {/* Bio */}
-        <p className="mt-3.5 text-sm text-slate-300 line-clamp-2 leading-relaxed min-h-[2.5rem]">
-          {student.bio || 'No campus bio added yet.'}
-        </p>
-      </div>
-
-      {/* Footer: Graph Stats & Follow / Profile Buttons */}
-      <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3 text-xs text-slate-400">
-          <span className="inline-flex items-center gap-1">
-            <Users className="w-3.5 h-3.5 text-slate-500" />
-            <strong className="text-slate-200">{followersCount}</strong> followers
-          </span>
-          <span>•</span>
-          <span>
-            <strong className="text-slate-200">{followingCount}</strong> following
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onViewProfile(student.id)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/80 transition-colors"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            Profile
-          </button>
-
-          {!isSelf && (
-            <button
-              onClick={() => onToggleFollow(student, isFollowing)}
-              disabled={busy}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-                isFollowing
-                  ? 'bg-emerald-500/15 hover:bg-rose-500/20 text-emerald-300 hover:text-rose-300 border border-emerald-500/30 hover:border-rose-500/40'
-                  : 'bg-gradient-to-r from-fuchsia-600 to-purple-600 hover:from-fuchsia-500 hover:to-purple-500 text-white shadow-md shadow-fuchsia-950/50'
-              }`}
-            >
-              {isFollowing ? (
-                <>
-                  <UserCheck className="w-3.5 h-3.5" />
-                  Following
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-3.5 h-3.5" />
-                  Follow
-                </>
-              )}
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
