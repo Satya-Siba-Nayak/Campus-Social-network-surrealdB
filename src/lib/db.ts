@@ -191,10 +191,22 @@ export async function initDB(mode?: EngineMode): Promise<Surreal> {
 export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<void> {
   const client = db ?? (await initDB());
 
+  // Ensure tables exist in SurrealDB 3.x so SELECT/DELETE never throws "The table '...' does not exist"
+  await client.query(`
+    DEFINE TABLE IF NOT EXISTS student SCHEMALESS;
+    DEFINE TABLE IF NOT EXISTS post SCHEMALESS;
+    DEFINE TABLE IF NOT EXISTS follows TYPE RELATION SCHEMALESS;
+    DEFINE TABLE IF NOT EXISTS wrote TYPE RELATION SCHEMALESS;
+  `).collect();
+
   if (!force) {
-    const [existing] = await client.query<[ unknown[] ]>('SELECT id FROM student LIMIT 1;').collect();
-    if (Array.isArray(existing) && existing.length > 0) {
-      return;
+    try {
+      const [existing] = await client.query<[ unknown[] ]>('SELECT id FROM student LIMIT 1;').collect();
+      if (Array.isArray(existing) && existing.length > 0) {
+        return;
+      }
+    } catch {
+      // Table is empty or not initialized yet; proceed to seed
     }
   } else {
     const tReset = performance.now();
