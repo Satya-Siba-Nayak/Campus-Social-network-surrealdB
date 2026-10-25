@@ -9,36 +9,51 @@ export interface Student {
   branch: string;
   year: number;
   bio: string;
-  avatar_color?: string;
   created_at?: string;
 }
 
 export interface Post {
-  id: string; // e.g., "post:..." or "wrote:..."
+  id: string; // e.g., "post:p1"
   text: string;
   created_at: string;
   author_id: string;
   author_name: string;
   author_branch: string;
   author_year: number;
-  edge_id?: string;
+  edge_id?: string; // e.g., "wrote:..."
 }
 
 export interface GraphRelationship {
   id: string;
   in: string;
   out: string;
+  created_at?: string;
+}
+
+export interface WroteEdgeRecord {
+  id: string;
+  in: string;
+  out: string;
+  text: string;
+  created_at: string;
+}
+
+export interface PostNodeRecord {
+  id: string;
+  text: string;
+  created_at: string;
 }
 
 export interface QueryLogEntry {
   id: string;
   timestamp: string;
+  operationType: 'CREATE' | 'READ' | 'UPDATE' | 'DELETE' | 'RELATE' | 'GRAPH' | 'SYSTEM';
+  fnName: string; // The exact TypeScript function in src/lib/db.ts
   surql: string;
   description: string;
   durationMs: number;
 }
 
-// Global query log subscribers so the UI can show live SurrealQL executions!
 type LogListener = (logs: QueryLogEntry[]) => void;
 let queryLogs: QueryLogEntry[] = [];
 const logListeners = new Set<LogListener>();
@@ -56,15 +71,23 @@ export function clearQueryLogs() {
   logListeners.forEach((l) => l(queryLogs));
 }
 
-function recordQueryLog(surql: string, description: string, durationMs: number) {
+function recordQueryLog(
+  operationType: QueryLogEntry['operationType'],
+  fnName: string,
+  surql: string,
+  description: string,
+  durationMs: number
+) {
   const entry: QueryLogEntry = {
     id: Math.random().toString(36).slice(2, 10),
     timestamp: new Date().toLocaleTimeString(),
+    operationType,
+    fnName,
     surql: surql.trim(),
     description,
     durationMs: Math.round(durationMs * 10) / 10,
   };
-  queryLogs = [entry, ...queryLogs].slice(0, 35);
+  queryLogs = [entry, ...queryLogs].slice(0, 50);
   logListeners.forEach((l) => l(queryLogs));
 }
 
@@ -72,7 +95,6 @@ function recordQueryLog(surql: string, description: string, durationMs: number) 
 export function normalizeId(val: unknown): string {
   if (!val) return '';
   if (typeof val === 'string') {
-    // Strip SurrealQL angle brackets or backticks if present, e.g., student:`alice` -> student:alice
     return val.replace(/[`⟨⟩]/g, '');
   }
   if (typeof val === 'object' && val !== null) {
@@ -82,9 +104,10 @@ export function normalizeId(val: unknown): string {
     }
     if ('table' in val && 'id' in val) {
       const r = val as { table: { name?: string } | string; id: unknown };
-      const tbName = typeof r.table === 'object' && r.table !== null && 'name' in r.table
-        ? r.table.name
-        : String(r.table);
+      const tbName =
+        typeof r.table === 'object' && r.table !== null && 'name' in r.table
+          ? r.table.name
+          : String(r.table);
       return `${tbName}:${String(r.id)}`.replace(/[`⟨⟩]/g, '');
     }
     return String(val).replace(/[`⟨⟩]/g, '');
@@ -111,12 +134,10 @@ function normalizeStudent(raw: Record<string, unknown>): Student {
     branch: String(raw.branch ?? 'General'),
     year: Number(raw.year ?? 1),
     bio: String(raw.bio ?? ''),
-    avatar_color: raw.avatar_color ? String(raw.avatar_color) : undefined,
     created_at: raw.created_at ? String(raw.created_at) : undefined,
   };
 }
 
-// Singleton Surreal instance configured with @surrealdb/wasm
 let dbInstance: Surreal | null = null;
 let currentEngineMode: EngineMode = 'indxdb';
 let initPromise: Promise<Surreal> | null = null;
@@ -128,7 +149,7 @@ export function getEngineMode(): EngineMode {
 /**
  * Initialize SurrealDB in the browser via WebAssembly (`createWasmEngines()`).
  * Connects to `indxdb://campus-social` by default for persistent storage across refreshes,
- * with fallback or toggle support for `mem://` in-memory engine.
+ * with toggle support for `mem://` in-memory engine.
  * Uses Namespace: "campus", Database: "social".
  */
 export async function initDB(mode?: EngineMode): Promise<Surreal> {
@@ -158,7 +179,6 @@ export async function initDB(mode?: EngineMode): Promise<Surreal> {
     try {
       await db.connect(endpoint);
     } catch (err) {
-      // Fallback to mem:// if IndexedDB is blocked in private browsing
       if (currentEngineMode === 'indxdb') {
         console.warn('IndexedDB unavailable, falling back to mem://', err);
         currentEngineMode = 'mem';
@@ -172,6 +192,8 @@ export async function initDB(mode?: EngineMode): Promise<Surreal> {
     dbInstance = db;
 
     recordQueryLog(
+      'SYSTEM',
+      'initDB()',
       `CONNECT ${currentEngineMode === 'indxdb' ? 'indxdb://campus-social' : 'mem://'};\nUSE NS campus DB social;`,
       `Initialized SurrealDB WASM engine (${currentEngineMode === 'indxdb' ? 'IndexedDB Persistent' : 'In-Memory'})`,
       performance.now() - t0
@@ -191,7 +213,7 @@ export async function initDB(mode?: EngineMode): Promise<Surreal> {
 export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<void> {
   const client = db ?? (await initDB());
 
-  // Ensure tables exist in SurrealDB 3.x so SELECT/DELETE never throws "The table '...' does not exist"
+  // Define tables upfront so SurrealDB 3.x never throws "The table '...' does not exist"
   await client.query(`
     DEFINE TABLE IF NOT EXISTS student SCHEMALESS;
     DEFINE TABLE IF NOT EXISTS post SCHEMALESS;
@@ -201,12 +223,12 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
 
   if (!force) {
     try {
-      const [existing] = await client.query<[ unknown[] ]>('SELECT id FROM student LIMIT 1;').collect();
+      const [existing] = await client.query<[unknown[]]>('SELECT id FROM student LIMIT 1;').collect();
       if (Array.isArray(existing) && existing.length > 0) {
         return;
       }
     } catch {
-      // Table is empty or not initialized yet; proceed to seed
+      // Proceed to seed
     }
   } else {
     const tReset = performance.now();
@@ -217,15 +239,17 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
       DELETE wrote;
     `).collect();
     recordQueryLog(
+      'DELETE',
+      'seedDemoDataIfEmpty(force=true)',
       `DELETE student; DELETE post; DELETE follows; DELETE wrote;`,
-      'Cleared existing campus database tables & edges',
+      'Cleared all 4 tables in campus.social database',
       performance.now() - tReset
     );
   }
 
   const t0 = performance.now();
   const seedSql = `
-    -- 1. Create Demo Students
+    -- 1. Create Demo Students (Table: student)
     CREATE student:alice SET
       name = "Alice Chen",
       branch = "Computer Science",
@@ -268,7 +292,7 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
       bio = "Autonomous quadrotors, ROS2 navigation & 3D printing custom carbon frames.",
       created_at = time::now();
 
-    -- 2. Create Social Graph Relationships (RELATE student->follows->student)
+    -- 2. Create Social Graph Relationships (Edge Table: follows)
     -- Alice follows Bob and Priya
     RELATE student:alice->follows->student:bob SET created_at = time::now();
     RELATE student:alice->follows->student:priya SET created_at = time::now();
@@ -295,13 +319,12 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
     RELATE student:devon->follows->student:bob SET created_at = time::now();
     RELATE student:devon->follows->student:elena SET created_at = time::now();
 
-    -- 3. Create Posts & Graph Authorship Edges
+    -- 3. Create Posts & Graph Authorship Edges (Tables: post, wrote)
     CREATE post:p1 SET text = "Just got SurrealDB running 100% in-browser via WebAssembly! Zero backend servers, full multi-hop graph traversal in milliseconds.", created_at = time::now();
     RELATE student:alice->wrote->post:p1 SET text = "Just got SurrealDB running 100% in-browser via WebAssembly! Zero backend servers, full multi-hop graph traversal in milliseconds.", created_at = time::now();
 
-    CREATE post:p2 SET text = "Anyone heading to the late-night Hackathon qualifiers in Turing Hall? Need one more teammate who knows TypeScript or Rust!", created_at = time::now();
+    CREATE post:p2 SET text = "Anyone heading to the first-floor Robotics Lab tonight? Testing our new LiDAR SLAM pipeline on the quadruped.", created_at = time::now();
     RELATE student:bob->wrote->post:p2 SET text = "Anyone heading to the first-floor Robotics Lab tonight? Testing our new LiDAR SLAM pipeline on the quadruped.", created_at = time::now();
-    UPDATE post:p2 SET text = "Anyone heading to the first-floor Robotics Lab tonight? Testing our new LiDAR SLAM pipeline on the quadruped.";
 
     CREATE post:p3 SET text = "Pro-tip for Graph Theory 302: SurrealQL's SELECT ->follows->follows->student syntax makes 2-hop friend recommendation queries a one-liner.", created_at = time::now();
     RELATE student:priya->wrote->post:p3 SET text = "Pro-tip for Graph Theory 302: SurrealQL's SELECT ->follows->follows->student syntax makes 2-hop friend recommendation queries a one-liner.", created_at = time::now();
@@ -309,15 +332,17 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
     CREATE post:p4 SET text = "Hosting a workshop on browser sandboxing & WebAssembly memory safety this Friday at 4 PM. Free pizza and stickers!", created_at = time::now();
     RELATE student:marcus->wrote->post:p4 SET text = "Hosting a workshop on browser sandboxing & WebAssembly memory safety this Friday at 4 PM. Free pizza and stickers!", created_at = time::now();
 
-    CREATE post:p5 SET text = "Designed a new dark-mode design system for our campus portal. Let me know what you think of the glassmorphic graph visualizer!", created_at = time::now();
-    RELATE student:elena->wrote->post:p5 SET text = "Designed a new dark-mode design system for our campus portal. Let me know what you think of the glassmorphic graph visualizer!", created_at = time::now();
+    CREATE post:p5 SET text = "Designed a new dark-mode design system for our campus portal. Let me know what you think of the interactive graph visualizer!", created_at = time::now();
+    RELATE student:elena->wrote->post:p5 SET text = "Designed a new dark-mode design system for our campus portal. Let me know what you think of the interactive graph visualizer!", created_at = time::now();
   `;
 
   await client.query(seedSql).collect();
 
   recordQueryLog(
+    'SYSTEM',
+    'seedDemoDataIfEmpty()',
     `CREATE student:alice ...;\nRELATE student:alice->follows->student:bob;\nRELATE student:alice->wrote->post:p1 SET text = "...", created_at = time::now();`,
-    'Seeded 6 campus students, 13 follow graph edges, and 5 posts',
+    'Seeded 6 students, 12 follows edges, and 5 wrote->post records',
     performance.now() - t0
   );
 }
@@ -326,16 +351,18 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
 // 1. STUDENT CRUD OPERATIONS
 // ============================================================================
 
-export async function getAllStudents(): Promise<Student[]> {
+export async function getAllStudents(silent = false): Promise<Student[]> {
   const db = await initDB();
   const t0 = performance.now();
   const surql = 'SELECT * FROM student ORDER BY name ASC;';
   const [rows] = await db.query<[Record<string, unknown>[]]>(surql).collect();
-  recordQueryLog(surql, 'List all students', performance.now() - t0);
+  if (!silent) {
+    recordQueryLog('READ', 'getAllStudents()', surql, 'Fetch all records from student table', performance.now() - t0);
+  }
   return (rows ?? []).map(normalizeStudent);
 }
 
-export async function getStudentById(studentId: string): Promise<Student | null> {
+export async function getStudentById(studentId: string, silent = false): Promise<Student | null> {
   const db = await initDB();
   const t0 = performance.now();
   const rid = toRecordId(studentId);
@@ -346,7 +373,15 @@ export async function getStudentById(studentId: string): Promise<Student | null>
       { rid }
     )
     .collect();
-  recordQueryLog(`SELECT * FROM ${cleanId};`, `View student profile (${cleanId})`, performance.now() - t0);
+  if (!silent) {
+    recordQueryLog(
+      'READ',
+      `getStudentById("${cleanId}")`,
+      `SELECT * FROM ${cleanId};`,
+      `Read single student record (${cleanId})`,
+      performance.now() - t0
+    );
+  }
   if (!rows || rows.length === 0) return null;
   return normalizeStudent(rows[0]);
 }
@@ -361,15 +396,13 @@ export async function createStudent(input: {
   const db = await initDB();
   const t0 = performance.now();
 
-  // Create a clean readable slug ID like student:alice or student:rahul_sharma
   const rawSlug = (input.slug || input.name)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
   const baseKey = rawSlug || `user_${Math.random().toString(36).slice(2, 7)}`;
 
-  // Check if ID already exists; if so, append short suffix
-  const existing = await getStudentById(`student:${baseKey}`);
+  const existing = await getStudentById(`student:${baseKey}`, true);
   const finalKey = existing ? `${baseKey}_${Math.random().toString(36).slice(2, 5)}` : baseKey;
   const rid = new RecordId('student', finalKey);
 
@@ -387,8 +420,10 @@ export async function createStudent(input: {
     .collect();
 
   recordQueryLog(
-    `CREATE student:${finalKey} SET name = ${JSON.stringify(input.name)}, branch = ${JSON.stringify(input.branch)}, year = ${Number(input.year)}, bio = ${JSON.stringify(input.bio)};`,
-    `Created student student:${finalKey}`,
+    'CREATE',
+    'createStudent()',
+    `CREATE student:${finalKey} SET name = ${JSON.stringify(input.name.trim())}, branch = ${JSON.stringify(input.branch.trim())}, year = ${Number(input.year)}, bio = ${JSON.stringify(input.bio.trim())};`,
+    `Created student record student:${finalKey}`,
     performance.now() - t0
   );
 
@@ -412,8 +447,10 @@ export async function updateStudentBio(studentId: string, bio: string): Promise<
     .collect();
 
   recordQueryLog(
+    'UPDATE',
+    `updateStudentBio("${cleanId}")`,
     `UPDATE ${cleanId} SET bio = ${JSON.stringify(bio.trim())};`,
-    `Updated bio for ${cleanId}`,
+    `Updated bio field on ${cleanId}`,
     performance.now() - t0
   );
 
@@ -429,7 +466,6 @@ export async function deleteStudent(studentId: string): Promise<void> {
   const rid = toRecordId(studentId);
   const cleanId = normalizeId(studentId);
 
-  // Clean up authored posts, wrote edges, follow edges, and the student record
   await db
     .query(
       `
@@ -444,8 +480,10 @@ export async function deleteStudent(studentId: string): Promise<void> {
     .collect();
 
   recordQueryLog(
+    'DELETE',
+    `deleteStudent("${cleanId}")`,
     `DELETE follows WHERE in = ${cleanId} OR out = ${cleanId};\nDELETE wrote WHERE in = ${cleanId};\nDELETE ${cleanId};`,
-    `Deleted student ${cleanId} and connected graph edges`,
+    `Deleted ${cleanId} + cascaded graph edges in follows & wrote`,
     performance.now() - t0
   );
 }
@@ -459,12 +497,9 @@ export async function createPost(authorStudentId: string, text: string): Promise
   const t0 = performance.now();
   const authorRid = toRecordId(authorStudentId);
   const cleanAuthor = normalizeId(authorStudentId);
-  const postKey = Math.random().toString(36).slice(2, 10);
+  const postKey = Math.random().toString(36).slice(2, 8);
   const postRid = new RecordId('post', postKey);
 
-  // Uses the exact requested SurrealQL pattern:
-  // RELATE student:alice->wrote->post:uuid SET text = "...", created_at = time::now()
-  // And populates the target post node as well for rich querying
   await db
     .query(
       `
@@ -480,12 +515,14 @@ export async function createPost(authorStudentId: string, text: string): Promise
     .collect();
 
   recordQueryLog(
-    `RELATE ${cleanAuthor}->wrote->post:${postKey} SET text = ${JSON.stringify(text.trim())}, created_at = time::now();`,
-    `Created post linked to ${cleanAuthor}`,
+    'RELATE',
+    `createPost("${cleanAuthor}")`,
+    `CREATE post:${postKey} SET text = ${JSON.stringify(text.trim())}, created_at = time::now();\nRELATE ${cleanAuthor}->wrote->post:${postKey} SET text = ${JSON.stringify(text.trim())}, created_at = time::now();`,
+    `Created post:${postKey} and linked ${cleanAuthor}->wrote->post:${postKey}`,
     performance.now() - t0
   );
 
-  const author = await getStudentById(cleanAuthor);
+  const author = await getStudentById(cleanAuthor, true);
   return {
     id: `post:${postKey}`,
     text: text.trim(),
@@ -497,11 +534,10 @@ export async function createPost(authorStudentId: string, text: string): Promise
   };
 }
 
-export async function getAllPosts(): Promise<Post[]> {
+export async function getAllPosts(silent = false): Promise<Post[]> {
   const db = await initDB();
   const t0 = performance.now();
 
-  // Traverse the `wrote` graph edge to retrieve post details alongside the author student record
   const surql = `
     SELECT
       id AS edge_id,
@@ -517,11 +553,15 @@ export async function getAllPosts(): Promise<Post[]> {
   `;
 
   const [rows] = await db.query<[Record<string, unknown>[]]>(surql).collect();
-  recordQueryLog(
-    `SELECT out AS id, out.text AS text, in.name AS author_name FROM wrote ORDER BY created_at DESC;`,
-    'Fetched campus post feed with graph author resolution',
-    performance.now() - t0
-  );
+  if (!silent) {
+    recordQueryLog(
+      'READ',
+      'getAllPosts()',
+      `SELECT out AS id, out.text AS text, in AS author_id, in.name AS author_name FROM wrote ORDER BY created_at DESC;`,
+      'List all posts with graph author traversal (in.name)',
+      performance.now() - t0
+    );
+  }
 
   return (rows ?? []).map((r) => ({
     id: normalizeId(r.id || r.edge_id),
@@ -533,12 +573,6 @@ export async function getAllPosts(): Promise<Post[]> {
     author_branch: String(r.author_branch ?? 'Campus'),
     author_year: Number(r.author_year ?? 1),
   }));
-}
-
-export async function getStudentPosts(studentId: string): Promise<Post[]> {
-  const all = await getAllPosts();
-  const target = normalizeId(studentId);
-  return all.filter((p) => p.author_id === target);
 }
 
 export async function updatePost(postId: string, newText: string): Promise<void> {
@@ -558,8 +592,10 @@ export async function updatePost(postId: string, newText: string): Promise<void>
     .collect();
 
   recordQueryLog(
-    `UPDATE ${cleanPostId} SET text = ${JSON.stringify(newText.trim())};`,
-    `Edited post ${cleanPostId}`,
+    'UPDATE',
+    `updatePost("${cleanPostId}")`,
+    `UPDATE ${cleanPostId} SET text = ${JSON.stringify(newText.trim())};\nUPDATE wrote SET text = ${JSON.stringify(newText.trim())} WHERE out = ${cleanPostId};`,
+    `Updated text on ${cleanPostId}`,
     performance.now() - t0
   );
 }
@@ -581,8 +617,10 @@ export async function deletePost(postId: string): Promise<void> {
     .collect();
 
   recordQueryLog(
+    'DELETE',
+    `deletePost("${cleanPostId}")`,
     `DELETE wrote WHERE out = ${cleanPostId};\nDELETE ${cleanPostId};`,
-    `Deleted post ${cleanPostId}`,
+    `Deleted post ${cleanPostId} and its wrote graph edge`,
     performance.now() - t0
   );
 }
@@ -603,7 +641,6 @@ export async function followStudent(fromStudentId: string, toStudentId: string):
   const fromRid = toRecordId(cleanFrom);
   const toRid = toRecordId(cleanTo);
 
-  // Check if already following to avoid duplicate edges
   const [existing] = await db
     .query<[unknown[]]>(
       `SELECT id FROM follows WHERE in = $fromRid AND out = $toRid LIMIT 1;`,
@@ -623,8 +660,10 @@ export async function followStudent(fromStudentId: string, toStudentId: string):
     .collect();
 
   recordQueryLog(
+    'RELATE',
+    `followStudent("${cleanFrom}", "${cleanTo}")`,
     `RELATE ${cleanFrom}->follows->${cleanTo};`,
-    `${cleanFrom} followed ${cleanTo}`,
+    `Created graph edge ${cleanFrom} -> follows -> ${cleanTo}`,
     performance.now() - t0
   );
 }
@@ -645,29 +684,25 @@ export async function unfollowStudent(fromStudentId: string, toStudentId: string
     .collect();
 
   recordQueryLog(
+    'DELETE',
+    `unfollowStudent("${cleanFrom}", "${cleanTo}")`,
     `DELETE follows WHERE in = ${cleanFrom} AND out = ${cleanTo};`,
-    `${cleanFrom} unfollowed ${cleanTo}`,
+    `Removed graph edge ${cleanFrom} -> follows -> ${cleanTo}`,
     performance.now() - t0
   );
 }
 
-/**
- * Helper to extract an array of RecordIds or Student records from a SurrealQL graph traversal result
- * like `SELECT ->follows->student FROM student:alice`
- */
 function extractGraphTargetIds(queryResult: unknown[]): string[] {
   if (!Array.isArray(queryResult) || queryResult.length === 0) return [];
   const firstRow = queryResult[0];
   if (!firstRow || typeof firstRow !== 'object') return [];
 
-  // Find the first property in the returned row (e.g. "->follows->student" or "students")
   const values = Object.values(firstRow as Record<string, unknown>);
   if (values.length === 0) return [];
 
   const rawList = values[0];
   if (!Array.isArray(rawList)) return [];
 
-  // Flatten in case SurrealDB returns nested arrays for multi-hop
   const flattened = rawList.flat(3);
   const ids = new Set<string>();
   for (const item of flattened) {
@@ -685,7 +720,7 @@ function extractGraphTargetIds(queryResult: unknown[]): string[] {
  * 1-Hop Outgoing Graph Query:
  * `SELECT ->follows->student FROM student:alice`
  */
-export async function getFollowing(studentId: string): Promise<Student[]> {
+export async function getFollowing(studentId: string, silent = false): Promise<Student[]> {
   const db = await initDB();
   const t0 = performance.now();
   const cleanId = normalizeId(studentId);
@@ -698,16 +733,20 @@ export async function getFollowing(studentId: string): Promise<Student[]> {
     )
     .collect();
 
-  recordQueryLog(
-    `SELECT ->follows->student FROM ${cleanId};`,
-    `1-hop outgoing graph query: Who ${cleanId} follows`,
-    performance.now() - t0
-  );
+  if (!silent) {
+    recordQueryLog(
+      'GRAPH',
+      `getFollowing("${cleanId}")`,
+      `SELECT ->follows->student FROM ${cleanId};`,
+      `1-hop outgoing graph traversal (Following list for ${cleanId})`,
+      performance.now() - t0
+    );
+  }
 
   const targetIds = extractGraphTargetIds(graphRes);
   if (targetIds.length === 0) return [];
 
-  const allStudents = await getAllStudents();
+  const allStudents = await getAllStudents(true);
   const studentMap = new Map(allStudents.map((s) => [s.id, s]));
   return targetIds.map((id) => studentMap.get(id)).filter((s): s is Student => Boolean(s));
 }
@@ -716,7 +755,7 @@ export async function getFollowing(studentId: string): Promise<Student[]> {
  * 1-Hop Incoming Graph Query:
  * `SELECT <-follows<-student FROM student:alice`
  */
-export async function getFollowers(studentId: string): Promise<Student[]> {
+export async function getFollowers(studentId: string, silent = false): Promise<Student[]> {
   const db = await initDB();
   const t0 = performance.now();
   const cleanId = normalizeId(studentId);
@@ -729,32 +768,37 @@ export async function getFollowers(studentId: string): Promise<Student[]> {
     )
     .collect();
 
-  recordQueryLog(
-    `SELECT <-follows<-student FROM ${cleanId};`,
-    `1-hop incoming graph query: Followers of ${cleanId}`,
-    performance.now() - t0
-  );
+  if (!silent) {
+    recordQueryLog(
+      'GRAPH',
+      `getFollowers("${cleanId}")`,
+      `SELECT <-follows<-student FROM ${cleanId};`,
+      `1-hop incoming graph traversal (Followers list for ${cleanId})`,
+      performance.now() - t0
+    );
+  }
 
   const targetIds = extractGraphTargetIds(graphRes);
   if (targetIds.length === 0) return [];
 
-  const allStudents = await getAllStudents();
+  const allStudents = await getAllStudents(true);
   const studentMap = new Map(allStudents.map((s) => [s.id, s]));
   return targetIds.map((id) => studentMap.get(id)).filter((s): s is Student => Boolean(s));
 }
 
 export interface FriendOfFriendRecommendation {
   student: Student;
-  mutualConnections: Student[]; // 1-hop friends who follow this 2-hop student
+  mutualConnections: Student[];
 }
 
 /**
  * 2-Hop "Friends of Friends" Graph Query:
  * `SELECT ->follows->follows->student FROM student:alice`
- * Returns people followed by people `studentId` follows (excluding self and already-followed students),
- * enriched with the intermediate bridge connections to visually demonstrate the 2-hop path!
  */
-export async function getFriendsOfFriends(studentId: string): Promise<{
+export async function getFriendsOfFriends(
+  studentId: string,
+  silent = false
+): Promise<{
   rawTwoHopAll: Student[];
   recommendations: FriendOfFriendRecommendation[];
 }> {
@@ -763,21 +807,24 @@ export async function getFriendsOfFriends(studentId: string): Promise<{
   const cleanId = normalizeId(studentId);
   const rid = toRecordId(cleanId);
 
-  // Execute the exact 2-hop SurrealQL graph traversal required:
   const [twoHopRes, oneHopRes, allFollowEdges, allStudents] = await Promise.all([
     db.query<[unknown[]]>(`SELECT ->follows->follows->student FROM $rid;`, { rid }).collect(),
     db.query<[unknown[]]>(`SELECT ->follows->student FROM $rid;`, { rid }).collect(),
     db.query<[Record<string, unknown>[]]>(
       `SELECT id, in, out FROM follows;`
     ).collect(),
-    getAllStudents(),
+    getAllStudents(true),
   ]);
 
-  recordQueryLog(
-    `SELECT ->follows->follows->student FROM ${cleanId};`,
-    `2-hop Friends-of-Friends graph traversal from ${cleanId}`,
-    performance.now() - t0
-  );
+  if (!silent) {
+    recordQueryLog(
+      'GRAPH',
+      `getFriendsOfFriends("${cleanId}")`,
+      `SELECT ->follows->follows->student FROM ${cleanId};`,
+      `2-hop Friends-of-Friends graph traversal from ${cleanId}`,
+      performance.now() - t0
+    );
+  }
 
   const twoHopIds = extractGraphTargetIds(twoHopRes[0]);
   const oneHopIds = new Set(extractGraphTargetIds(oneHopRes[0]));
@@ -787,7 +834,6 @@ export async function getFriendsOfFriends(studentId: string): Promise<{
     .map((id) => studentMap.get(id))
     .filter((s): s is Student => Boolean(s));
 
-  // Build adjacency map for bridge explanations (student:alice -> student:bob -> student:marcus)
   const edges = (allFollowEdges[0] ?? []).map((e) => ({
     in: normalizeId(e.in),
     out: normalizeId(e.out),
@@ -796,12 +842,10 @@ export async function getFriendsOfFriends(studentId: string): Promise<{
   const recommendations: FriendOfFriendRecommendation[] = [];
 
   for (const targetId of twoHopIds) {
-    // Exclude self and people already followed (1-hop) so recommendations are actionable
     if (targetId === cleanId || oneHopIds.has(targetId)) continue;
     const targetStudent = studentMap.get(targetId);
     if (!targetStudent) continue;
 
-    // Find which 1-hop friends follow this targetStudent
     const mutuals: Student[] = [];
     for (const edge of edges) {
       if (edge.out === targetId && oneHopIds.has(edge.in)) {
@@ -825,13 +869,13 @@ export async function getFriendsOfFriends(studentId: string): Promise<{
 }
 
 /**
- * Fetch all `follows` graph edges in the database so we can render follow counts and network visuals
+ * Fetch all `follows` graph edges in the database
  */
 export async function getAllFollowEdges(): Promise<GraphRelationship[]> {
   const db = await initDB();
   const [rows] = await db
     .query<[Record<string, unknown>[]]>(
-      `SELECT id, in, out FROM follows;`
+      `SELECT id, in, out, created_at FROM follows;`
     )
     .collect();
 
@@ -839,5 +883,57 @@ export async function getAllFollowEdges(): Promise<GraphRelationship[]> {
     id: normalizeId(r.id),
     in: normalizeId(r.in),
     out: normalizeId(r.out),
+    created_at: r.created_at ? String(r.created_at) : undefined,
   }));
+}
+
+/**
+ * Fetch raw `post` table records and raw `wrote` edge records for the Database Tables Inspector
+ */
+export async function getRawPostAndWroteTables(): Promise<{
+  postNodes: PostNodeRecord[];
+  wroteEdges: WroteEdgeRecord[];
+}> {
+  const db = await initDB();
+  const [postRows, wroteRows] = await Promise.all([
+    db.query<[Record<string, unknown>[]]>(
+      `SELECT id, text, created_at FROM post ORDER BY created_at DESC;`
+    ).collect(),
+    db.query<[Record<string, unknown>[]]>(
+      `SELECT id, in, out, text, created_at FROM wrote ORDER BY created_at DESC;`
+    ).collect(),
+  ]);
+
+  const postNodes: PostNodeRecord[] = (postRows[0] ?? []).map((r) => ({
+    id: normalizeId(r.id),
+    text: String(r.text ?? ''),
+    created_at: r.created_at ? String(r.created_at) : '',
+  }));
+
+  const wroteEdges: WroteEdgeRecord[] = (wroteRows[0] ?? []).map((r) => ({
+    id: normalizeId(r.id),
+    in: normalizeId(r.in),
+    out: normalizeId(r.out),
+    text: String(r.text ?? ''),
+    created_at: r.created_at ? String(r.created_at) : '',
+  }));
+
+  return { postNodes, wroteEdges };
+}
+
+/**
+ * Execute an arbitrary custom SurrealQL query from the Interactive Query Runner
+ */
+export async function executeCustomSurql(surql: string): Promise<unknown> {
+  const db = await initDB();
+  const t0 = performance.now();
+  const results = await db.query(surql).collect();
+  recordQueryLog(
+    'GRAPH',
+    'executeCustomSurql()',
+    surql,
+    'Executed custom SurrealQL query in console',
+    performance.now() - t0
+  );
+  return results;
 }

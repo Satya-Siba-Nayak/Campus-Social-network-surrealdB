@@ -4,6 +4,10 @@ import {
   Search,
   RotateCcw,
   Terminal,
+  Database,
+  Users,
+  MessageSquare,
+  UserCircle,
   ChevronDown,
 } from 'lucide-react';
 import {
@@ -23,11 +27,14 @@ import {
   getFollowers,
   getFriendsOfFriends,
   getAllFollowEdges,
+  getRawPostAndWroteTables,
   subscribeQueryLogs,
   getEngineMode,
   Student,
   Post,
   GraphRelationship,
+  WroteEdgeRecord,
+  PostNodeRecord,
   FriendOfFriendRecommendation,
   QueryLogEntry,
   EngineMode,
@@ -38,18 +45,22 @@ import { FriendsOfFriendsPanel } from './components/FriendsOfFriendsPanel';
 import { ProfileView } from './components/ProfileView';
 import { CreateStudentModal } from './components/CreateStudentModal';
 import { QueryInspector } from './components/QueryInspector';
+import { DatabaseStudioView } from './components/DatabaseStudioView';
 import { ToastContainer, ToastMessage } from './components/ToastContainer';
 
-type NavTab = 'students' | 'feed' | 'profile';
+type NavTab = 'students' | 'feed' | 'profile' | 'studio';
 
 export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [engineMode, setEngineMode] = useState<EngineMode>('indxdb');
 
+  // Database Entities & Raw Tables
   const [students, setStudents] = useState<Student[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [followEdges, setFollowEdges] = useState<GraphRelationship[]>([]);
+  const [postNodes, setPostNodes] = useState<PostNodeRecord[]>([]);
+  const [wroteEdges, setWroteEdges] = useState<WroteEdgeRecord[]>([]);
 
   const [currentUserId, setCurrentUserId] = useState<string>('student:alice');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('student:alice');
@@ -73,7 +84,7 @@ export function App() {
   const [feedPostText, setFeedPostText] = useState('');
   const [feedFilter, setFeedFilter] = useState<'all' | 'following'>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [showQueryConsole, setShowQueryConsole] = useState(false);
+  const [showQueryConsole, setShowQueryConsole] = useState(true);
   const [busyAction, setBusyAction] = useState(false);
 
   const [queryLogs, setQueryLogs] = useState<QueryLogEntry[]>([]);
@@ -99,17 +110,20 @@ export function App() {
   }, []);
 
   const refreshAllData = useCallback(
-    async (activeUid?: string, profileUid?: string) => {
+    async (activeUid?: string, profileUid?: string, silent = false) => {
       try {
-        const [allStudents, allPosts, allEdges] = await Promise.all([
-          getAllStudents(),
-          getAllPosts(),
+        const [allStudents, allPosts, allEdges, rawTables] = await Promise.all([
+          getAllStudents(silent),
+          getAllPosts(silent),
           getAllFollowEdges(),
+          getRawPostAndWroteTables(),
         ]);
 
         setStudents(allStudents);
         setPosts(allPosts);
         setFollowEdges(allEdges);
+        setPostNodes(rawTables.postNodes);
+        setWroteEdges(rawTables.wroteEdges);
 
         const resolvedCurrentId =
           activeUid && allStudents.some((s) => s.id === activeUid)
@@ -137,9 +151,9 @@ export function App() {
 
         if (resolvedProfileId) {
           const [foll, follers, fof] = await Promise.all([
-            getFollowing(resolvedProfileId),
-            getFollowers(resolvedProfileId),
-            getFriendsOfFriends(resolvedProfileId),
+            getFollowing(resolvedProfileId, silent),
+            getFollowers(resolvedProfileId, silent),
+            getFriendsOfFriends(resolvedProfileId, silent),
           ]);
           setProfileFollowing(foll);
           setProfileFollowers(follers);
@@ -147,7 +161,7 @@ export function App() {
         }
 
         if (resolvedCurrentId) {
-          const fof = await getFriendsOfFriends(resolvedCurrentId);
+          const fof = await getFriendsOfFriends(resolvedCurrentId, true);
           setMyFoF(fof);
         }
       } catch (err) {
@@ -167,7 +181,7 @@ export function App() {
         await initDB('indxdb');
         if (!mounted) return;
         setEngineMode(getEngineMode());
-        await refreshAllData('student:alice', 'student:alice');
+        await refreshAllData('student:alice', 'student:alice', false);
       } catch (err) {
         if (!mounted) return;
         setError(err instanceof Error ? err.message : 'Failed to initialize SurrealDB WASM');
@@ -185,9 +199,9 @@ export function App() {
     (async () => {
       try {
         const [foll, follers, fof] = await Promise.all([
-          getFollowing(selectedProfileId),
-          getFollowers(selectedProfileId),
-          getFriendsOfFriends(selectedProfileId),
+          getFollowing(selectedProfileId, false),
+          getFollowers(selectedProfileId, false),
+          getFriendsOfFriends(selectedProfileId, false),
         ]);
         setProfileFollowing(foll);
         setProfileFollowers(follers);
@@ -202,7 +216,7 @@ export function App() {
     if (loading || !currentUserId) return;
     (async () => {
       try {
-        const fof = await getFriendsOfFriends(currentUserId);
+        const fof = await getFriendsOfFriends(currentUserId, true);
         setMyFoF(fof);
       } catch (err) {
         console.error(err);
@@ -235,6 +249,10 @@ export function App() {
     }
     return set;
   }, [followEdges, currentUserId]);
+
+  const currentUserFoFIds = useMemo(() => {
+    return new Set(myFoF.recommendations.map((r) => r.student.id));
+  }, [myFoF]);
 
   const followCountsByStudent = useMemo(() => {
     const map = new Map<string, { followers: number; following: number }>();
@@ -288,7 +306,7 @@ export function App() {
     try {
       await initDB(targetMode);
       setEngineMode(getEngineMode());
-      await refreshAllData('student:alice', 'student:alice');
+      await refreshAllData('student:alice', 'student:alice', true);
       addToast(
         'info',
         `Switched storage to ${targetMode === 'indxdb' ? 'IndexedDB' : 'Memory'}`
@@ -304,10 +322,10 @@ export function App() {
     setBusyAction(true);
     try {
       await seedDemoDataIfEmpty(undefined, true);
-      await refreshAllData('student:alice', 'student:alice');
+      await refreshAllData('student:alice', 'student:alice', true);
       setCurrentUserId('student:alice');
       setSelectedProfileId('student:alice');
-      addToast('info', 'Demo data reset');
+      addToast('info', 'Reset & re-seeded all 4 database tables');
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Reset failed');
     } finally {
@@ -325,8 +343,8 @@ export function App() {
     setBusyAction(true);
     try {
       const created = await createStudent(data);
-      await refreshAllData();
-      addToast('success', `Added ${created.name}`);
+      await refreshAllData(undefined, undefined, true);
+      addToast('success', `CREATE ${created.id} (${created.name})`);
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Failed to create student');
     } finally {
@@ -338,8 +356,8 @@ export function App() {
     setBusyAction(true);
     try {
       const updated = await updateStudentBio(studentId, newBio);
-      await refreshAllData();
-      addToast('success', `Updated ${updated.name}'s bio`);
+      await refreshAllData(undefined, undefined, true);
+      addToast('success', `UPDATE ${updated.id} SET bio`);
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Failed to update bio');
     } finally {
@@ -357,11 +375,11 @@ export function App() {
       const nextProfileId =
         selectedProfileId === student.id ? nextUserId : selectedProfileId;
 
-      await refreshAllData(nextUserId, nextProfileId);
+      await refreshAllData(nextUserId, nextProfileId, true);
       if (selectedProfileId === student.id && activeTab === 'profile') {
         setActiveTab('students');
       }
-      addToast('info', `Removed ${student.name}`);
+      addToast('info', `DELETE ${student.id} & cascaded edges`);
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Failed to delete student');
     } finally {
@@ -378,14 +396,27 @@ export function App() {
     try {
       if (isCurrentlyFollowing) {
         await unfollowStudent(currentUser.id, targetStudent.id);
-        addToast('info', `Unfollowed ${targetStudent.name.split(' ')[0]}`);
+        addToast('info', `Unfollowed ${targetStudent.id}`);
       } else {
         await followStudent(currentUser.id, targetStudent.id);
-        addToast('success', `Following ${targetStudent.name.split(' ')[0]}`);
+        addToast('success', `RELATE ${currentUser.id}->follows->${targetStudent.id}`);
       }
-      await refreshAllData();
+      await refreshAllData(undefined, undefined, true);
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setBusyAction(false);
+    }
+  };
+
+  const handleUnfollowDirect = async (fromId: string, toId: string) => {
+    setBusyAction(true);
+    try {
+      await unfollowStudent(fromId, toId);
+      await refreshAllData(undefined, undefined, true);
+      addToast('info', `DELETE edge ${fromId}->follows->${toId}`);
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : 'Failed to delete edge');
     } finally {
       setBusyAction(false);
     }
@@ -394,9 +425,9 @@ export function App() {
   const handleCreatePost = async (authorId: string, text: string) => {
     setBusyAction(true);
     try {
-      await createPost(authorId, text);
-      await refreshAllData();
-      addToast('success', 'Post published');
+      const created = await createPost(authorId, text);
+      await refreshAllData(undefined, undefined, true);
+      addToast('success', `RELATE ${authorId}->wrote->${created.id}`);
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Failed to create post');
     } finally {
@@ -415,8 +446,8 @@ export function App() {
     setBusyAction(true);
     try {
       await updatePost(postId, newText);
-      await refreshAllData();
-      addToast('success', 'Post updated');
+      await refreshAllData(undefined, undefined, true);
+      addToast('success', `UPDATE ${postId} SET text`);
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Failed to update post');
     } finally {
@@ -428,8 +459,8 @@ export function App() {
     setBusyAction(true);
     try {
       await deletePost(postId);
-      await refreshAllData();
-      addToast('info', 'Post deleted');
+      await refreshAllData(undefined, undefined, true);
+      addToast('info', `DELETE ${postId}`);
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Failed to delete post');
     } finally {
@@ -447,7 +478,7 @@ export function App() {
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6">
         <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-white animate-spin mb-4" />
-        <p className="text-sm font-medium text-zinc-400">Starting SurrealDB WASM...</p>
+        <p className="text-sm font-medium text-zinc-400">Starting SurrealDB WASM Engine...</p>
       </div>
     );
   }
@@ -473,67 +504,86 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col">
-      {/* Revolut-Inspired Minimal Top Navigation */}
-      <header className="sticky top-0 z-30 backdrop-blur-xl bg-black/80 border-b border-white/[0.06]">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      {/* Top Navigation */}
+      <header className="sticky top-0 z-30 backdrop-blur-xl bg-black/85 border-b border-white/[0.07]">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
           {/* Left: Brand */}
           <div
             onClick={() => setActiveTab('students')}
-            className="flex items-center gap-3 cursor-pointer"
+            className="flex items-center gap-3 cursor-pointer shrink-0"
           >
             <div className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center font-bold text-sm tracking-tighter">
               C
             </div>
-            <span className="font-bold text-[17px] tracking-tight text-white hidden sm:inline">
-              Campus
-            </span>
+            <div className="hidden sm:block">
+              <span className="font-bold text-[16px] tracking-tight text-white block leading-none">
+                CampusGraph
+              </span>
+              <span className="text-[10px] font-mono text-emerald-400">
+                SurrealDB WASM (campus.social)
+              </span>
+            </div>
           </div>
 
-          {/* Center: Segmented Pill Navigation (Students | Feed | My Profile) */}
-          <nav className="flex items-center p-1 rounded-full bg-[#121215] border border-white/[0.06]">
+          {/* Center: 4 Clear Navigation Pills */}
+          <nav className="flex items-center p-1 rounded-full bg-[#121215] border border-white/[0.07] overflow-x-auto">
             <button
               onClick={() => setActiveTab('students')}
-              className={`px-4 py-1.5 rounded-full text-[13px] font-medium transition-all ${
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs sm:text-[13px] font-medium transition-all whitespace-nowrap ${
                 activeTab === 'students'
                   ? 'bg-white text-black font-semibold'
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
-              Students
+              <Users className="w-3.5 h-3.5" />
+              Students ({students.length})
             </button>
             <button
               onClick={() => setActiveTab('feed')}
-              className={`px-4 py-1.5 rounded-full text-[13px] font-medium transition-all ${
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs sm:text-[13px] font-medium transition-all whitespace-nowrap ${
                 activeTab === 'feed'
                   ? 'bg-white text-black font-semibold'
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
-              Feed
+              <MessageSquare className="w-3.5 h-3.5" />
+              Feed ({posts.length})
             </button>
             <button
               onClick={() => {
                 if (currentUser) setSelectedProfileId(currentUser.id);
                 setActiveTab('profile');
               }}
-              className={`px-4 py-1.5 rounded-full text-[13px] font-medium transition-all ${
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs sm:text-[13px] font-medium transition-all whitespace-nowrap ${
                 activeTab === 'profile'
                   ? 'bg-white text-black font-semibold'
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
+              <UserCircle className="w-3.5 h-3.5" />
               My Profile
+            </button>
+            <button
+              onClick={() => setActiveTab('studio')}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs sm:text-[13px] font-medium transition-all whitespace-nowrap ${
+                activeTab === 'studio'
+                  ? 'bg-emerald-400 text-black font-semibold'
+                  : 'text-emerald-400 hover:text-emerald-300'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              DB &amp; Graph Studio
             </button>
           </nav>
 
-          {/* Right: Active Identity Switcher & Subtle Tools */}
-          <div className="flex items-center gap-2">
+          {/* Right: Active User Perspective Switcher & Live Log Toggle */}
+          <div className="flex items-center gap-2 shrink-0">
             {currentUser && (
-              <div className="relative flex items-center">
+              <div className="relative hidden md:flex items-center">
                 <div
-                  className={`w-6 h-6 rounded-full ${getAvatarGradient(
+                  className={`w-5 h-5 rounded-full ${getAvatarGradient(
                     currentUser.id
-                  )} flex items-center justify-center text-[10px] font-semibold absolute left-2 pointer-events-none`}
+                  )} flex items-center justify-center text-[9px] font-semibold absolute left-2.5 pointer-events-none`}
                 >
                   {getInitials(currentUser.name)}
                 </div>
@@ -545,12 +595,12 @@ export function App() {
                     setFeedAuthorId(newId);
                     if (activeTab === 'profile') setSelectedProfileId(newId);
                   }}
-                  title="Active Student Perspective"
-                  className="appearance-none bg-[#121215] hover:bg-[#18181c] text-xs font-medium text-zinc-200 border border-white/[0.06] rounded-full pl-9 pr-7 py-1.5 focus:outline-none cursor-pointer transition-colors"
+                  title="Switch Active Student Perspective"
+                  className="appearance-none bg-[#121215] hover:bg-[#18181c] text-xs font-medium text-zinc-200 border border-white/[0.08] rounded-full pl-9 pr-7 py-1.5 focus:outline-none cursor-pointer transition-colors"
                 >
                   {students.map((s) => (
                     <option key={s.id} value={s.id} className="bg-[#121215] text-white">
-                      {s.name.split(' ')[0]}
+                      Acting as: {s.name} ({s.id})
                     </option>
                   ))}
                 </select>
@@ -560,56 +610,65 @@ export function App() {
 
             <button
               onClick={() => setShowQueryConsole((v) => !v)}
-              title="Toggle SurrealQL Log"
-              className={`p-2 rounded-full border transition-colors ${
+              title="Toggle Live SurrealQL Log"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
                 showQueryConsole
-                  ? 'bg-white text-black border-white'
-                  : 'bg-[#121215] text-zinc-400 border-white/[0.06] hover:text-white'
+                  ? 'bg-white text-black border-white font-semibold'
+                  : 'bg-[#121215] text-zinc-400 border-white/[0.08] hover:text-white'
               }`}
             >
-              <Terminal className="w-4 h-4" />
+              <Terminal className="w-3.5 h-3.5" />
+              <span className="hidden lg:inline">SQL Log ({queryLogs.length})</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Content Container */}
-      <main className="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Optional Collapsible SurrealQL Inspector */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-7 space-y-7">
+        {/* Live SurrealQL & Function Execution Drawer (Visible by default for Faculty Demo) */}
         {showQueryConsole && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-zinc-500">
-              <div className="flex items-center gap-2">
-                <span>Storage Engine:</span>
+          <div className="space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-zinc-400">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium text-zinc-300">WASM Storage Engine:</span>
                 <button
                   onClick={() => handleSwitchEngine('indxdb')}
-                  className={`px-2.5 py-1 rounded-full font-mono text-[11px] transition-colors ${
+                  className={`px-3 py-1 rounded-full font-mono text-[11px] transition-colors ${
                     engineMode === 'indxdb'
                       ? 'bg-white text-black font-semibold'
-                      : 'bg-[#121215] text-zinc-400 hover:text-white'
+                      : 'bg-[#121215] text-zinc-400 hover:text-white border border-white/[0.06]'
                   }`}
                 >
-                  indxdb://campus-social
+                  indxdb://campus-social (Persistent)
                 </button>
                 <button
                   onClick={() => handleSwitchEngine('mem')}
-                  className={`px-2.5 py-1 rounded-full font-mono text-[11px] transition-colors ${
+                  className={`px-3 py-1 rounded-full font-mono text-[11px] transition-colors ${
                     engineMode === 'mem'
                       ? 'bg-white text-black font-semibold'
-                      : 'bg-[#121215] text-zinc-400 hover:text-white'
+                      : 'bg-[#121215] text-zinc-400 hover:text-white border border-white/[0.06]'
                   }`}
                 >
-                  mem://
+                  mem:// (In-Memory)
                 </button>
               </div>
-              <button
-                onClick={handleResetDemoData}
-                disabled={busyAction}
-                className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Reset demo data
-              </button>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setActiveTab('studio')}
+                  className="text-emerald-400 hover:underline font-medium"
+                >
+                  Open Full Tables &amp; Graph Studio →
+                </button>
+                <button
+                  onClick={handleResetDemoData}
+                  disabled={busyAction}
+                  className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-white transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reset Demo Seed
+                </button>
+              </div>
             </div>
             <QueryInspector logs={queryLogs} engineMode={engineMode} />
           </div>
@@ -619,64 +678,33 @@ export function App() {
         {/* TAB 1: STUDENTS                                                */}
         {/* ============================================================== */}
         {activeTab === 'students' && (
-          <div className="space-y-8">
-            {/* Revolut-Style Hero Overview */}
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
+          <div className="space-y-7">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
               <div>
-                <p className="text-[13px] font-medium text-zinc-500">
-                  Campus Network · {students.length} Students
+                <p className="text-xs font-mono uppercase tracking-wider text-zinc-400">
+                  Table: student ({students.length} records) · Edge Table: follows ({followEdges.length} edges)
                 </p>
-                <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mt-1">
-                  Directory
+                <h1 className="text-3xl font-bold text-white tracking-tight mt-1">
+                  Campus Students
                 </h1>
               </div>
 
               <div className="flex items-center gap-2.5">
                 <button
-                  onClick={handleResetDemoData}
-                  disabled={busyAction}
-                  title="Reset demo data"
-                  className="p-2.5 rounded-full bg-[#121215] hover:bg-[#1a1a1f] text-zinc-400 hover:text-white border border-white/[0.06] transition-colors"
+                  onClick={() => setActiveTab('studio')}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-[13px] font-semibold bg-[#121215] hover:bg-[#1a1a1f] text-emerald-400 border border-emerald-500/30 transition-colors"
                 >
-                  <RotateCcw className={`w-4 h-4 ${busyAction ? 'animate-spin' : ''}`} />
+                  <Database className="w-4 h-4" />
+                  View DB Tables &amp; Graph
                 </button>
                 <button
                   onClick={() => setIsCreateModalOpen(true)}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-[14px] font-semibold bg-white hover:bg-zinc-200 text-black transition-all"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-[13px] font-semibold bg-white hover:bg-zinc-200 text-black transition-all"
                 >
                   <Plus className="w-4 h-4" />
-                  Add student
+                  Create Student
                 </button>
-              </div>
-            </div>
-
-            {/* Search & Horizontal Branch Pills */}
-            <div className="space-y-3">
-              <div className="relative">
-                <Search className="w-4 h-4 text-zinc-500 absolute left-4 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by name, branch, or bio..."
-                  className="w-full pl-11 pr-4 py-3 rounded-2xl bg-[#121215] border border-white/[0.06] focus:border-white/20 text-[14px] text-white placeholder-zinc-500 focus:outline-none transition-colors"
-                />
-              </div>
-
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                {branches.map((b) => (
-                  <button
-                    key={b}
-                    onClick={() => setBranchFilter(b)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
-                      branchFilter === b
-                        ? 'bg-white text-black font-semibold'
-                        : 'bg-[#121215] text-zinc-400 hover:text-white border border-white/[0.05]'
-                    }`}
-                  >
-                    {b === 'ALL' ? 'All branches' : b}
-                  </button>
-                ))}
               </div>
             </div>
 
@@ -692,12 +720,42 @@ export function App() {
               />
             )}
 
+            {/* Search & Branch Filter */}
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="w-4 h-4 text-zinc-500 absolute left-4 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search students by name, record ID (student:alice), branch, or bio..."
+                  className="w-full pl-11 pr-4 py-3 rounded-2xl bg-[#121215] border border-white/[0.07] focus:border-white/25 text-[14px] text-white placeholder-zinc-500 focus:outline-none transition-colors"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                {branches.map((b) => (
+                  <button
+                    key={b}
+                    onClick={() => setBranchFilter(b)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                      branchFilter === b
+                        ? 'bg-white text-black font-semibold'
+                        : 'bg-[#121215] text-zinc-400 hover:text-white border border-white/[0.06]'
+                    }`}
+                  >
+                    {b === 'ALL' ? 'All branches' : b}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Students Grid */}
             {filteredStudents.length === 0 ? (
-              <div className="rounded-[24px] bg-[#121215] border border-white/[0.06] p-12 text-center space-y-3">
+              <div className="rounded-[24px] bg-[#121215] border border-white/[0.07] p-12 text-center space-y-2">
                 <p className="text-[15px] font-medium text-zinc-300">No students found</p>
                 <p className="text-[13px] text-zinc-500">
-                  Try another search or add a new student to the network.
+                  Try clearing your search or create a new student.
                 </p>
               </div>
             ) : (
@@ -732,89 +790,97 @@ export function App() {
         {/* TAB 2: FEED                                                    */}
         {/* ============================================================== */}
         {activeTab === 'feed' && (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="flex items-end justify-between">
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
-                <p className="text-[13px] font-medium text-zinc-500">Campus Activity</p>
-                <h1 className="text-3xl font-bold text-white tracking-tight mt-1">Feed</h1>
+                <p className="text-xs font-mono uppercase tracking-wider text-zinc-400">
+                  Table: post ({postNodes.length}) · Graph Edge Table: wrote ({wroteEdges.length})
+                </p>
+                <h1 className="text-3xl font-bold text-white tracking-tight mt-1">
+                  Campus Post Feed
+                </h1>
               </div>
 
-              {/* All vs Following Pill Toggle */}
-              <div className="inline-flex p-1 rounded-full bg-[#121215] border border-white/[0.06]">
+              <div className="inline-flex p-1 rounded-full bg-[#121215] border border-white/[0.07]">
                 <button
                   onClick={() => setFeedFilter('all')}
-                  className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
                     feedFilter === 'all'
                       ? 'bg-white text-black font-semibold'
                       : 'text-zinc-400 hover:text-white'
                   }`}
                 >
-                  All ({posts.length})
+                  All Posts ({posts.length})
                 </button>
                 <button
                   onClick={() => setFeedFilter('following')}
-                  className={`px-3.5 py-1 rounded-full text-xs font-medium transition-all ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all ${
                     feedFilter === 'following'
                       ? 'bg-white text-black font-semibold'
                       : 'text-zinc-400 hover:text-white'
                   }`}
                 >
-                  Following
+                  Following Only
                 </button>
               </div>
             </div>
 
-            {/* Clean Composer Card */}
+            {/* Composer Card */}
             <form
               onSubmit={handleFeedPostSubmit}
-              className="rounded-[24px] bg-[#121215] border border-white/[0.06] p-5 space-y-4"
+              className="rounded-[24px] bg-[#121215] border border-white/[0.07] p-6 space-y-4"
             >
-              <textarea
-                rows={3}
-                value={feedPostText}
-                onChange={(e) => setFeedPostText(e.target.value)}
-                placeholder="What's happening on campus?"
-                className="w-full bg-transparent text-[15px] text-white placeholder-zinc-500 focus:outline-none resize-none"
-              />
-
-              <div className="flex items-center justify-between gap-3 pt-3 border-t border-white/[0.05]">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-500">Posting as</span>
+                  <span className="text-xs font-medium text-zinc-400">Author Student:</span>
                   <select
                     value={feedAuthorId}
                     onChange={(e) => setFeedAuthorId(e.target.value)}
-                    className="rounded-full bg-[#18181c] border border-white/[0.06] px-3 py-1 text-xs font-medium text-zinc-200 focus:outline-none"
+                    className="rounded-full bg-[#18181c] border border-white/[0.08] px-3.5 py-1.5 text-xs font-semibold text-white focus:outline-none"
                   >
                     {students.map((s) => (
                       <option key={s.id} value={s.id} className="bg-[#121215]">
-                        {s.name}
+                        {s.name} ({s.id})
                       </option>
                     ))}
                   </select>
                 </div>
+                <code className="text-[11px] font-mono text-sky-400">
+                  RELATE {feedAuthorId}-&gt;wrote-&gt;post:uuid SET text = &quot;...&quot;, created_at = time::now()
+                </code>
+              </div>
 
+              <textarea
+                rows={3}
+                value={feedPostText}
+                onChange={(e) => setFeedPostText(e.target.value)}
+                placeholder="Write a campus post..."
+                className="w-full rounded-2xl bg-[#18181c] border border-white/[0.06] focus:border-white/20 p-4 text-[15px] text-white placeholder-zinc-500 focus:outline-none resize-none"
+              />
+
+              <div className="flex items-center justify-end">
                 <button
                   type="submit"
                   disabled={busyAction || !feedPostText.trim() || !feedAuthorId}
-                  className="px-5 py-2 rounded-full text-xs font-semibold bg-white hover:bg-zinc-200 text-black transition-all disabled:opacity-40"
+                  className="px-6 py-2 rounded-full text-xs font-semibold bg-white hover:bg-zinc-200 text-black transition-all disabled:opacity-40"
                 >
-                  Post
+                  Create Post (RELATE)
                 </button>
               </div>
             </form>
 
             {/* Posts List */}
             {filteredPosts.length === 0 ? (
-              <div className="rounded-[24px] bg-[#121215] border border-white/[0.06] p-12 text-center space-y-1">
-                <p className="text-[15px] font-medium text-zinc-300">No posts yet</p>
+              <div className="rounded-[24px] bg-[#121215] border border-white/[0.07] p-12 text-center space-y-1">
+                <p className="text-[15px] font-medium text-zinc-300">No posts in this feed</p>
                 <p className="text-[13px] text-zinc-500">
                   {feedFilter === 'following'
-                    ? 'Follow more students or switch to All.'
-                    : 'Share the first post above.'}
+                    ? 'Follow more students or switch to All Posts.'
+                    : 'Publish a post above.'}
                 </p>
               </div>
             ) : (
-              <div className="space-y-3.5">
+              <div className="space-y-4">
                 {filteredPosts.map((post) => (
                   <PostCard
                     key={post.id}
@@ -853,9 +919,32 @@ export function App() {
               setFeedAuthorId(studentId);
               setSelectedProfileId(studentId);
               const st = students.find((s) => s.id === studentId);
-              if (st) addToast('info', `Switched to ${st.name.split(' ')[0]}`);
+              if (st) addToast('info', `Switched active perspective to ${st.name}`);
             }}
             onBackToStudents={() => setActiveTab('students')}
+          />
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 4: DATABASE & GRAPH STUDIO (FACULTY DEMO VIEW)             */}
+        {/* ============================================================== */}
+        {activeTab === 'studio' && (
+          <DatabaseStudioView
+            students={students}
+            followEdges={followEdges}
+            wroteEdges={wroteEdges}
+            postNodes={postNodes}
+            currentUserId={currentUser?.id ?? ''}
+            followingIds={currentUserFollowingIds}
+            followerIds={currentUserFollowerIds}
+            fofIds={currentUserFoFIds}
+            onSelectStudent={handleViewProfile}
+            onDeleteStudent={handleDeleteStudent}
+            onDeletePost={handleDeletePost}
+            onUnfollow={handleUnfollowDirect}
+            onRefreshAll={async () => {
+              await refreshAllData(undefined, undefined, true);
+            }}
           />
         )}
       </main>
