@@ -4,7 +4,7 @@ import { createWasmEngines } from '@surrealdb/wasm';
 export type EngineMode = 'indxdb' | 'mem';
 
 export interface Student {
-  id: string; // e.g., "student:alice"
+  id: string; // e.g., "student:aarav"
   name: string;
   branch: string;
   year: number;
@@ -223,6 +223,12 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
 
   if (!force) {
     try {
+      // If student:alice or student:bob exists from older demo, wipe and re-seed with Indian names
+      const [oldAlice] = await client.query<[unknown[]]>('SELECT id FROM student:alice;').collect();
+      if (Array.isArray(oldAlice) && oldAlice.length > 0) {
+        await seedDemoDataIfEmpty(client, true);
+        return;
+      }
       const [existing] = await client.query<[unknown[]]>('SELECT id FROM student LIMIT 1;').collect();
       if (Array.isArray(existing) && existing.length > 0) {
         return;
@@ -250,15 +256,15 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
   const t0 = performance.now();
   const seedSql = `
     -- 1. Create Demo Students (Table: student)
-    CREATE student:alice SET
-      name = "Alice Chen",
+    CREATE student:aarav SET
+      name = "Aarav Sharma",
       branch = "Computer Science",
       year = 3,
       bio = "Building distributed graph engines & Rust WASM compilers. President of ACM Chapter.",
       created_at = time::now();
 
-    CREATE student:bob SET
-      name = "Bob Martinez",
+    CREATE student:rohan SET
+      name = "Rohan Verma",
       branch = "Electrical & AI",
       year = 4,
       bio = "Embedded systems, FPGA synthesis & neuromorphic hardware. Always in the robotics lab.",
@@ -271,69 +277,69 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
       bio = "Graph neural networks, social network analysis & competitive programming.",
       created_at = time::now();
 
-    CREATE student:marcus SET
-      name = "Marcus Vance",
+    CREATE student:kabir SET
+      name = "Kabir Mehta",
       branch = "Cybersecurity",
       year = 2,
       bio = "CTF player, zero-knowledge proofs & kernel exploitation enthusiast. Organizing CampusSec.",
       created_at = time::now();
 
-    CREATE student:elena SET
-      name = "Elena Rostova",
+    CREATE student:ananya SET
+      name = "Ananya Iyer",
       branch = "Computational Design",
       year = 4,
       bio = "Generative WebGL shaders, interactive UI architecture & human-computer interaction.",
       created_at = time::now();
 
-    CREATE student:devon SET
-      name = "Devon Brooks",
+    CREATE student:aditya SET
+      name = "Aditya Rao",
       branch = "Mechanical & Robotics",
       year = 1,
       bio = "Autonomous quadrotors, ROS2 navigation & 3D printing custom carbon frames.",
       created_at = time::now();
 
     -- 2. Create Social Graph Relationships (Edge Table: follows)
-    -- Alice follows Bob and Priya
-    RELATE student:alice->follows->student:bob SET created_at = time::now();
-    RELATE student:alice->follows->student:priya SET created_at = time::now();
+    -- Aarav follows Rohan and Priya
+    RELATE student:aarav->follows->student:rohan SET created_at = time::now();
+    RELATE student:aarav->follows->student:priya SET created_at = time::now();
 
-    -- Bob follows Marcus and Elena (so Marcus & Elena are 2-hop Friends-of-Friends for Alice!)
-    RELATE student:bob->follows->student:marcus SET created_at = time::now();
-    RELATE student:bob->follows->student:elena SET created_at = time::now();
-    RELATE student:bob->follows->student:alice SET created_at = time::now();
+    -- Rohan follows Kabir and Ananya (so Kabir & Ananya are 2-hop Friends-of-Friends for Aarav!)
+    RELATE student:rohan->follows->student:kabir SET created_at = time::now();
+    RELATE student:rohan->follows->student:ananya SET created_at = time::now();
+    RELATE student:rohan->follows->student:aarav SET created_at = time::now();
 
-    -- Priya follows Elena and Devon (so Elena & Devon are 2-hop Friends-of-Friends for Alice!)
-    RELATE student:priya->follows->student:elena SET created_at = time::now();
-    RELATE student:priya->follows->student:devon SET created_at = time::now();
-    RELATE student:priya->follows->student:alice SET created_at = time::now();
+    -- Priya follows Ananya and Aditya (so Ananya & Aditya are 2-hop Friends-of-Friends for Aarav!)
+    RELATE student:priya->follows->student:ananya SET created_at = time::now();
+    RELATE student:priya->follows->student:aditya SET created_at = time::now();
+    RELATE student:priya->follows->student:aarav SET created_at = time::now();
 
-    -- Marcus follows Priya and Devon
-    RELATE student:marcus->follows->student:priya SET created_at = time::now();
-    RELATE student:marcus->follows->student:devon SET created_at = time::now();
+    -- Kabir follows Priya and Aditya
+    RELATE student:kabir->follows->student:priya SET created_at = time::now();
+    RELATE student:kabir->follows->student:aditya SET created_at = time::now();
 
-    -- Elena follows Alice and Marcus
-    RELATE student:elena->follows->student:alice SET created_at = time::now();
-    RELATE student:elena->follows->student:marcus SET created_at = time::now();
+    -- Ananya follows Aarav and Kabir
+    RELATE student:ananya->follows->student:aarav SET created_at = time::now();
+    RELATE student:ananya->follows->student:kabir SET created_at = time::now();
 
-    -- Devon follows Bob and Elena
-    RELATE student:devon->follows->student:bob SET created_at = time::now();
-    RELATE student:devon->follows->student:elena SET created_at = time::now();
+    -- Aditya follows Rohan and Ananya
+    RELATE student:aditya->follows->student:rohan SET created_at = time::now();
+    RELATE student:aditya->follows->student:ananya SET created_at = time::now();
 
     -- 3. Create Posts & Graph Authorship Edges (Tables: post, wrote)
     CREATE post:p1 SET text = "Just got SurrealDB running 100% in-browser via WebAssembly! Zero backend servers, full multi-hop graph traversal in milliseconds.", created_at = time::now();
-    RELATE student:alice->wrote->post:p1 SET text = "Just got SurrealDB running 100% in-browser via WebAssembly! Zero backend servers, full multi-hop graph traversal in milliseconds.", created_at = time::now();
+    RELATE student:aarav->wrote->post:p1 SET text = "Just got SurrealDB running 100% in-browser via WebAssembly! Zero backend servers, full multi-hop graph traversal in milliseconds.", created_at = time::now();
 
     CREATE post:p2 SET text = "Anyone heading to the first-floor Robotics Lab tonight? Testing our new LiDAR SLAM pipeline on the quadruped.", created_at = time::now();
-    RELATE student:bob->wrote->post:p2 SET text = "Anyone heading to the first-floor Robotics Lab tonight? Testing our new LiDAR SLAM pipeline on the quadruped.", created_at = time::now();
+    RELATE student:rohan->wrote->post:p2 SET text = "Anyone heading to the first-floor Robotics Lab tonight? Testing our new LiDAR SLAM pipeline on the quadruped.", created_at = time::now();
 
     CREATE post:p3 SET text = "Pro-tip for Graph Theory 302: SurrealQL's SELECT ->follows->follows->student syntax makes 2-hop friend recommendation queries a one-liner.", created_at = time::now();
     RELATE student:priya->wrote->post:p3 SET text = "Pro-tip for Graph Theory 302: SurrealQL's SELECT ->follows->follows->student syntax makes 2-hop friend recommendation queries a one-liner.", created_at = time::now();
 
     CREATE post:p4 SET text = "Hosting a workshop on browser sandboxing & WebAssembly memory safety this Friday at 4 PM. Free pizza and stickers!", created_at = time::now();
-    RELATE student:marcus->wrote->post:p4 SET text = "Hosting a workshop on browser sandboxing & WebAssembly memory safety this Friday at 4 PM. Free pizza and stickers!", created_at = time::now();
+    RELATE student:kabir->wrote->post:p4 SET text = "Hosting a workshop on browser sandboxing & WebAssembly memory safety this Friday at 4 PM. Free pizza and stickers!", created_at = time::now();
 
     CREATE post:p5 SET text = "Designed a new dark-mode design system for our campus portal. Let me know what you think of the interactive graph visualizer!", created_at = time::now();
-    RELATE student:elena->wrote->post:p5 SET text = "Designed a new dark-mode design system for our campus portal. Let me know what you think of the interactive graph visualizer!", created_at = time::now();
+    RELATE student:ananya->wrote->post:p5 SET text = "Designed a new dark-mode design system for our campus portal. Let me know what you think of the interactive graph visualizer!", created_at = time::now();
   `;
 
   await client.query(seedSql).collect();
@@ -341,7 +347,7 @@ export async function seedDemoDataIfEmpty(db?: Surreal, force = false): Promise<
   recordQueryLog(
     'SYSTEM',
     'seedDemoDataIfEmpty()',
-    `CREATE student:alice ...;\nRELATE student:alice->follows->student:bob;\nRELATE student:alice->wrote->post:p1 SET text = "...", created_at = time::now();`,
+    `CREATE student:aarav ...;\nRELATE student:aarav->follows->student:rohan;\nRELATE student:aarav->wrote->post:p1 SET text = "...", created_at = time::now();`,
     'Seeded 6 students, 12 follows edges, and 5 wrote->post records',
     performance.now() - t0
   );
@@ -718,7 +724,7 @@ function extractGraphTargetIds(queryResult: unknown[]): string[] {
 
 /**
  * 1-Hop Outgoing Graph Query:
- * `SELECT ->follows->student FROM student:alice`
+ * `SELECT ->follows->student FROM student:aarav`
  */
 export async function getFollowing(studentId: string, silent = false): Promise<Student[]> {
   const db = await initDB();
@@ -753,7 +759,7 @@ export async function getFollowing(studentId: string, silent = false): Promise<S
 
 /**
  * 1-Hop Incoming Graph Query:
- * `SELECT <-follows<-student FROM student:alice`
+ * `SELECT <-follows<-student FROM student:aarav`
  */
 export async function getFollowers(studentId: string, silent = false): Promise<Student[]> {
   const db = await initDB();
@@ -793,7 +799,7 @@ export interface FriendOfFriendRecommendation {
 
 /**
  * 2-Hop "Friends of Friends" Graph Query:
- * `SELECT ->follows->follows->student FROM student:alice`
+ * `SELECT ->follows->follows->student FROM student:aarav`
  */
 export async function getFriendsOfFriends(
   studentId: string,

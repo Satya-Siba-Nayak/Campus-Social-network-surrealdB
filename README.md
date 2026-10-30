@@ -27,7 +27,7 @@ Then open the local URL printed by Vite (typically `http://localhost:5173`).
   - Connects by default to `indxdb://campus-social` so your students, posts, and social graph relationships persist across page reloads.
   - Includes a header toggle to switch between `indxdb://campus-social` (persistent IndexedDB) and `mem://` (in-memory demo mode) on the fly.
 - **Namespace & Database**: Configured to use `namespace: "campus"` and `database: "social"`.
-- **Auto-Seeding**: On first load, if the database is empty, it automatically seeds 6 realistic campus students (`student:alice`, `student:bob`, `student:priya`, `student:marcus`, `student:elena`, `student:devon`), 13 `follows` graph edges, and 5 `wrote` -> `post` records.
+- **Auto-Seeding**: On first load, if the database is empty, it automatically seeds 6 realistic campus students (`student:aarav`, `student:rohan`, `student:priya`, `student:kabir`, `student:ananya`, `student:aditya`), 13 `follows` graph edges, and 5 `wrote` -> `post` records.
 
 ---
 
@@ -38,7 +38,7 @@ All database logic lives cleanly in [`src/lib/db.ts`](./src/lib/db.ts) and is lo
 ### 1. Students (CRUD)
 - **Create Student**:
   ```surql
-  CREATE student:alice SET name = "Alice Chen", branch = "Computer Science", year = 3, bio = "...";
+  CREATE student:aarav SET name = "Aarav Sharma", branch = "Computer Science", year = 3, bio = "...";
   ```
 - **List All Students**:
   ```surql
@@ -46,23 +46,23 @@ All database logic lives cleanly in [`src/lib/db.ts`](./src/lib/db.ts) and is lo
   ```
 - **View Single Student Profile**:
   ```surql
-  SELECT * FROM student:alice;
+  SELECT * FROM student:aarav;
   ```
 - **Update Student Bio**:
   ```surql
-  UPDATE student:alice SET bio = "...";
+  UPDATE student:aarav SET bio = "...";
   ```
 - **Delete Student (with Graph Edge Cleanup)**:
   ```surql
-  DELETE follows WHERE in = student:alice OR out = student:alice;
-  DELETE wrote WHERE in = student:alice;
-  DELETE student:alice;
+  DELETE follows WHERE in = student:aarav OR out = student:aarav;
+  DELETE wrote WHERE in = student:aarav;
+  DELETE student:aarav;
   ```
 
 ### 2. Posts & Graph Authorship
 - **Create Post Linked to Student**:
   ```surql
-  RELATE student:alice->wrote->post:uuid SET text = "...", created_at = time::now();
+  RELATE student:aarav->wrote->post:uuid SET text = "...", created_at = time::now();
   ```
 - **List Posts with Author Metadata**:
   ```surql
@@ -81,21 +81,21 @@ All database logic lives cleanly in [`src/lib/db.ts`](./src/lib/db.ts) and is lo
 ### 3. Social Graph Relationships (1-Hop & 2-Hop Traversal)
 - **Follow a Student**:
   ```surql
-  RELATE student:alice->follows->student:bob;
+  RELATE student:aarav->follows->student:rohan;
   ```
 - **Unfollow a Student**:
   ```surql
-  DELETE follows WHERE in = student:alice AND out = student:bob;
+  DELETE follows WHERE in = student:aarav AND out = student:rohan;
   ```
 - **Show "Following" List (1-Hop Outgoing)**:
   ```surql
-  SELECT ->follows->student FROM student:alice;
+  SELECT ->follows->student FROM student:aarav;
   ```
 - **Show "Followers" List (1-Hop Incoming)**:
   ```surql
-  SELECT <-follows<-student FROM student:alice;
+  SELECT <-follows<-student FROM student:aarav;
   ```
 - **"Friends of Friends" Recommendations (2-Hop Graph Traversal)**:
   ```surql
-  SELECT ->follows->follows->student FROM student:alice;
+  SELECT ->follows->follows->student FROM student:aarav;
   ```

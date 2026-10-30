@@ -62,8 +62,8 @@ export function App() {
   const [postNodes, setPostNodes] = useState<PostNodeRecord[]>([]);
   const [wroteEdges, setWroteEdges] = useState<WroteEdgeRecord[]>([]);
 
-  const [currentUserId, setCurrentUserId] = useState<string>('student:alice');
-  const [selectedProfileId, setSelectedProfileId] = useState<string>('student:alice');
+  const [currentUserId, setCurrentUserId] = useState<string>('student:aarav');
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('student:aarav');
 
   const [profileFollowing, setProfileFollowing] = useState<Student[]>([]);
   const [profileFollowers, setProfileFollowers] = useState<Student[]>([]);
@@ -80,7 +80,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('students');
   const [searchQuery, setSearchQuery] = useState('');
   const [branchFilter, setBranchFilter] = useState<string>('ALL');
-  const [feedAuthorId, setFeedAuthorId] = useState<string>('student:alice');
+  const [feedAuthorId, setFeedAuthorId] = useState<string>('student:aarav');
   const [feedPostText, setFeedPostText] = useState('');
   const [feedFilter, setFeedFilter] = useState<'all' | 'following'>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -181,7 +181,7 @@ export function App() {
         await initDB('indxdb');
         if (!mounted) return;
         setEngineMode(getEngineMode());
-        await refreshAllData('student:alice', 'student:alice', false);
+        await refreshAllData('student:aarav', 'student:aarav', false);
       } catch (err) {
         if (!mounted) return;
         setError(err instanceof Error ? err.message : 'Failed to initialize SurrealDB WASM');
@@ -306,7 +306,7 @@ export function App() {
     try {
       await initDB(targetMode);
       setEngineMode(getEngineMode());
-      await refreshAllData('student:alice', 'student:alice', true);
+      await refreshAllData('student:aarav', 'student:aarav', true);
       addToast(
         'info',
         `Switched storage to ${targetMode === 'indxdb' ? 'IndexedDB' : 'Memory'}`
@@ -322,9 +322,9 @@ export function App() {
     setBusyAction(true);
     try {
       await seedDemoDataIfEmpty(undefined, true);
-      await refreshAllData('student:alice', 'student:alice', true);
-      setCurrentUserId('student:alice');
-      setSelectedProfileId('student:alice');
+      await refreshAllData('student:aarav', 'student:aarav', true);
+      setCurrentUserId('student:aarav');
+      setSelectedProfileId('student:aarav');
       addToast('info', 'Reset & re-seeded all 4 database tables');
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : 'Reset failed');
@@ -728,7 +728,7 @@ export function App() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search students by name, record ID (student:alice), branch, or bio..."
+                  placeholder="Search students by name, record ID (student:aarav), branch, or bio..."
                   className="w-full pl-11 pr-4 py-3 rounded-2xl bg-[#121215] border border-white/[0.07] focus:border-white/25 text-[14px] text-white placeholder-zinc-500 focus:outline-none transition-colors"
                 />
               </div>

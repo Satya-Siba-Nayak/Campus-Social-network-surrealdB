@@ -42,18 +42,18 @@ const PRESET_QUERIES = [
   },
   {
     label: '2. 1-Hop Outgoing Following (Graph ->)',
-    fnName: 'getFollowing("student:alice")',
-    surql: 'SELECT ->follows->student FROM student:alice;',
+    fnName: 'getFollowing("student:aarav")',
+    surql: 'SELECT ->follows->student FROM student:aarav;',
   },
   {
     label: '3. 1-Hop Incoming Followers (Graph <-)',
-    fnName: 'getFollowers("student:alice")',
-    surql: 'SELECT <-follows<-student FROM student:alice;',
+    fnName: 'getFollowers("student:aarav")',
+    surql: 'SELECT <-follows<-student FROM student:aarav;',
   },
   {
     label: '4. 2-Hop Friends of Friends (Multi-hop Graph)',
-    fnName: 'getFriendsOfFriends("student:alice")',
-    surql: 'SELECT ->follows->follows->student FROM student:alice;',
+    fnName: 'getFriendsOfFriends("student:aarav")',
+    surql: 'SELECT ->follows->follows->student FROM student:aarav;',
   },
   {
     label: '5. Graph Authorship Join (wrote -> post)',
